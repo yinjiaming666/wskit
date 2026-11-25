@@ -1,4 +1,4 @@
-package socketserver
+package wskit
 
 import (
 	"bufio"

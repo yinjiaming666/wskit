@@ -1,6 +1,6 @@
-// Package socketserver embeds Redis-backed WebSocket routing, nodes and message delivery in a Go application.
+// Package wskit embeds Redis-backed WebSocket routing, nodes and message delivery in a Go application.
 // The application supplies authenticated identities and authorized channel subscriptions.
-package socketserver
+package wskit
 
 import (
 	"context"

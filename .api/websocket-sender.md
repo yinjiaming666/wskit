@@ -1,14 +1,14 @@
 # Go 消息发送
 
-业务服务导入 `github.com/yinjiaming666/wskit`，通过 `socketserver.NewSender(backend)` 创建发送器，复用至进程退出并调用 `Close()`。消息正文和投递流水由业务保存。
+业务服务导入 `github.com/yinjiaming666/wskit`，通过 `wskit.NewSender(backend)` 创建发送器，复用至进程退出并调用 `Close()`。消息正文和投递流水由业务保存。
 
 ## 私聊
 
-`sender.Send(ctx, toUserID, msg) (socketserver.Delivery, error)` 向该用户的所有在线连接投递。
+`sender.Send(ctx, toUserID, msg) (wskit.Delivery, error)` 向该用户的所有在线连接投递。
 
 - `toUserID` 和 `msg.ID` 必填。`msg.Frame` 是业务编码的文本或二进制帧。要让客户端确认消息，业务协议需在帧中携带消息 ID。
 - 参数校验、路由查询或登记待确认连接出错时返回 `error`。业务拿到 `nil` 错误后应继续读取 `Delivery`。
-- `Delivery.MessageID` 是传入的消息 ID（返回校验或依赖错误时也保留）。`Delivery` 嵌入共享的 `socketserver.DeliveryResult`。`AcceptedConnIDs` 列出已入队的连接，`FailedConnIDs` 列出投递失败的连接。部分成功时两个列表都有值，`Accepted` 为 `false`，`Reason` 提供失败原因。用户没有在线连接时 `Accepted=true`，两个列表都为空。节点间传输错误或缺失响应按失败连接汇总到结果，`error` 仍可为 `nil`；它不表示 WebSocket 写入成功或客户端确认。
+- `Delivery.MessageID` 是传入的消息 ID（返回校验或依赖错误时也保留）。`Delivery` 嵌入共享的 `wskit.DeliveryResult`。`AcceptedConnIDs` 列出已入队的连接，`FailedConnIDs` 列出投递失败的连接。部分成功时两个列表都有值，`Accepted` 为 `false`，`Reason` 提供失败原因。用户没有在线连接时 `Accepted=true`，两个列表都为空。节点间传输错误或缺失响应按失败连接汇总到结果，`error` 仍可为 `nil`；它不表示 WebSocket 写入成功或客户端确认。
 - `sender.PendingConnections(ctx, messageID)`、`AckedConnections`、`FailedConnections` 均返回 `([]string, error)`，分别查询待回执、已确认、回执跟踪失败的连接。查询失败时返回存储错误；各查询独立读取，不构成原子快照。回执跟踪失败与同步投递结果的 `FailedConnIDs` 含义不同。
 - 客户端实际确认由 `Session.Ack(ctx, messageID)` 单独登记，业务可通过 `sender.AckedConnections(ctx, messageID)` 查询。[节点 gRPC 契约](websocket-push-grpc.md)
 
@@ -53,7 +53,7 @@ type Delivery struct {
 
 `DeliveryResult` 在根包公开，内部节点入队、gRPC 客户端和跨节点聚合共用同一 Go 类型。只有 gRPC 协议边界与 protobuf `PushResponse` 转换。旧 `domain.SendResult` / `domain.PushResponse` 不再公开，子包实现已移入 `internal`。
 
-- `node.PushToConns(ctx, connIDs, frame)` 与 `node.PushToUsers(ctx, userIDs, frame)` 返回 `(*socketserver.DeliveryResult, error)`，仅向该节点本地连接入队，不附加消息 ID。宿主负责目标授权。
+- `node.PushToConns(ctx, connIDs, frame)` 与 `node.PushToUsers(ctx, userIDs, frame)` 返回 `(*wskit.DeliveryResult, error)`，仅向该节点本地连接入队，不附加消息 ID。宿主负责目标授权。
 - 本地推送复制调用方的帧数据，保留文本/二进制类型。上下文已取消、数据帧无效时返回错误；连接不存在或队列无法接受时计入 `FailedConnIDs`。用户在该节点没有连接时为空目标，结果仍为接受成功。
 - 直接读取 `delivery.Accepted` 等字段保持不变；构造字面量时需显式填写嵌入字段 `DeliveryResult`。JSON 编码仍将这些字段展平。
 - 原 `backend.Acks()` 删除，客户端回执和超时语义不变，业务使用根包 Sender 的查询和超时扫描能力。

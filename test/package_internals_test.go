@@ -16,11 +16,11 @@ import (
 // the toolchain those paths while keeping the test sources together under test/.
 // Embedding also invalidates the outer test cache when a white-box test changes.
 //
-//go:embed testdata/socketserver/*_test.go testdata/example/node/*_test.go
+//go:embed testdata/wskit/*_test.go testdata/example/node/*_test.go
 var whiteBoxFiles embed.FS
 
 func TestPackageInternals(t *testing.T) {
-	runPackageTests(t, "testdata/socketserver/*_test.go", ".")
+	runPackageTests(t, "testdata/wskit/*_test.go", ".")
 }
 
 func TestExampleNode(t *testing.T) {

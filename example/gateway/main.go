@@ -29,9 +29,9 @@ func startServer() error {
 	origin := flag.String("ws-origin", "ws://127.0.0.1:8081", "客户端可访问的 WebSocket 地址")
 	flag.Parse()
 
-	backend := socketserver.NewRedisBackend(socketserver.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
+	backend := wskit.NewRedisBackend(wskit.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
 	defer backend.Close()
-	gateway, err := socketserver.CreateGateway(socketserver.GatewayConfig{PublicURL: *origin}, backend)
+	gateway, err := wskit.CreateGateway(wskit.GatewayConfig{PublicURL: *origin}, backend)
 	if err != nil {
 		return err
 	}

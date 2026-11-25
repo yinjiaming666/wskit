@@ -11,7 +11,7 @@ import (
 )
 
 func TestDeliveryResultProtocolBoundary(t *testing.T) {
-	for _, want := range []socketserver.DeliveryResult{
+	for _, want := range []wskit.DeliveryResult{
 		{Accepted: true},
 		{Accepted: true, AcceptedConnIDs: []string{"a", "b"}},
 		{AcceptedConnIDs: []string{"a"}, FailedConnIDs: []string{"b"}, Reason: "some connections failed"},
@@ -24,7 +24,7 @@ func TestDeliveryResultProtocolBoundary(t *testing.T) {
 		if err := proto.Unmarshal(encoded, wire); err != nil {
 			t.Fatal(err)
 		}
-		var got *socketserver.DeliveryResult = grpcpush.PushResponseFromProto(wire)
+		var got *wskit.DeliveryResult = grpcpush.PushResponseFromProto(wire)
 		if !reflect.DeepEqual(*got, want) {
 			t.Fatalf("result changed across protobuf boundary: %+v, want %+v", got, want)
 		}

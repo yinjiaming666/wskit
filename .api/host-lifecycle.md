@@ -9,7 +9,7 @@
 
 ## Go 调用
 
-业务项目导入 `github.com/yinjiaming666/wskit`，通过 Go 包名 `socketserver` 调用库接口。
+业务项目导入 `github.com/yinjiaming666/wskit`，通过 Go 包名 `wskit` 调用库接口。
 
 | 接口 | 语义 |
 |---|---|

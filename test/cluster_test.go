@@ -23,20 +23,20 @@ import (
 )
 
 type runningNode struct {
-	node   *socketserver.Node
+	node   *wskit.Node
 	server *httptest.Server
 }
 
 const testChannel = "group:42"
 
-func startNode(t *testing.T, id string, b *socketserver.Backend) runningNode {
+func startNode(t *testing.T, id string, b *wskit.Backend) runningNode {
 	t.Helper()
-	node, err := socketserver.CreateNode(socketserver.NodeConfig{EndpointID: id, GRPCAddr: "127.0.0.1:0", OnMessage: testHostProtocol}, b)
+	node, err := wskit.CreateNode(wskit.NodeConfig{EndpointID: id, GRPCAddr: "127.0.0.1:0", OnMessage: testHostProtocol}, b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		info := socketserver.SessionInfo{ConnID: r.Header.Get("X-Test-Device")}
+		info := wskit.SessionInfo{ConnID: r.Header.Get("X-Test-Device")}
 		switch info.ConnID {
 		case "phone", "web":
 			info.UserID = "alice"
@@ -97,8 +97,8 @@ func (n runningNode) connect(t *testing.T, device string) *websocket.Conn {
 
 // This host uses plain-text membership commands and binary echo. The library
 // must not interpret even an input that looks like the standalone JSON protocol.
-func testHostProtocol(ctx context.Context, session *socketserver.Session, f socketserver.Frame) error {
-	if f.Type == socketserver.BinaryFrame {
+func testHostProtocol(ctx context.Context, session *wskit.Session, f wskit.Frame) error {
+	if f.Type == wskit.BinaryFrame {
 		return session.Send(f)
 	}
 	cmd, arg, _ := strings.Cut(string(f.Data), " ")
@@ -126,14 +126,14 @@ func testHostProtocol(ctx context.Context, session *socketserver.Session, f sock
 	}
 }
 
-func textFrame(s string) socketserver.Frame {
-	return socketserver.Frame{Type: socketserver.TextFrame, Data: []byte(s)}
+func textFrame(s string) wskit.Frame {
+	return wskit.Frame{Type: wskit.TextFrame, Data: []byte(s)}
 }
 
-func sendFrame(t *testing.T, c *websocket.Conn, f socketserver.Frame) {
+func sendFrame(t *testing.T, c *websocket.Conn, f wskit.Frame) {
 	t.Helper()
 	var wire any = f.Data
-	if f.Type == socketserver.TextFrame {
+	if f.Type == wskit.TextFrame {
 		wire = string(f.Data)
 	}
 	if err := websocket.Message.Send(c, wire); err != nil {
@@ -142,16 +142,16 @@ func sendFrame(t *testing.T, c *websocket.Conn, f socketserver.Frame) {
 }
 
 var frameReader = websocket.Codec{Unmarshal: func(data []byte, opcode byte, v any) error {
-	*v.(*socketserver.Frame) = socketserver.Frame{Type: socketserver.FrameType(opcode), Data: append([]byte(nil), data...)}
+	*v.(*wskit.Frame) = wskit.Frame{Type: wskit.FrameType(opcode), Data: append([]byte(nil), data...)}
 	return nil
 }}
 
-func wantFrame(t *testing.T, c *websocket.Conn, want socketserver.Frame) socketserver.Frame {
+func wantFrame(t *testing.T, c *websocket.Conn, want wskit.Frame) wskit.Frame {
 	t.Helper()
 	if err := c.SetReadDeadline(time.Now().Add(4 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	var got socketserver.Frame
+	var got wskit.Frame
 	if err := frameReader.Receive(c, &got); err != nil {
 		t.Fatal(err)
 	}
@@ -166,9 +166,9 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	if addr == "" {
 		t.Skip("set WS_TEST_REDIS_ADDR to run the two-node Redis/gRPC test")
 	}
-	config := socketserver.RedisConfig{Addr: addr, KeyPrefix: "ws-test:[app]:" + rand.Text() + ":"}
-	newBackend := func() *socketserver.Backend {
-		b := socketserver.NewRedisBackend(config)
+	config := wskit.RedisConfig{Addr: addr, KeyPrefix: "ws-test:[app]:" + rand.Text() + ":"}
+	newBackend := func() *wskit.Backend {
+		b := wskit.NewRedisBackend(config)
 		t.Cleanup(func() { b.Close() })
 		return b
 	}
@@ -178,7 +178,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	t.Cleanup(func() { state.Close() })
 
 	ctx := context.Background()
-	gateway, err := socketserver.CreateGateway(socketserver.GatewayConfig{PublicURL: "wss://ws.example.org"}, services)
+	gateway, err := wskit.CreateGateway(wskit.GatewayConfig{PublicURL: "wss://ws.example.org"}, services)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	if err != nil || len(endpoints) != 2 {
 		t.Fatalf("registered endpoints %v, %v", endpoints, err)
 	}
-	s, err := socketserver.NewSender(services)
+	s, err := wskit.NewSender(services)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	web := second.connect(t, "web")
 	tablet := second.connect(t, "tablet")
 
-	packet := socketserver.Frame{Type: socketserver.BinaryFrame, Data: []byte{0, 255, 1}}
+	packet := wskit.Frame{Type: wskit.BinaryFrame, Data: []byte{0, 255, 1}}
 	sendFrame(t, web, packet)
 	wantFrame(t, web, packet)
 	looksLikeJSON := textFrame(`{"c":"socket_server","m":"ping","data":{}}`)
@@ -223,7 +223,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	if err != nil || !slices.Equal(devices, []string{"phone", "web"}) || second.node.ConnCount() != 2 {
 		t.Fatalf("user connections %v, %v", devices, err)
 	}
-	if err := s.SendToChannel(ctx, testChannel, socketserver.Message{Frame: packet}); err != nil {
+	if err := s.SendToChannel(ctx, testChannel, wskit.Message{Frame: packet}); err != nil {
 		t.Fatal(err)
 	}
 	wantFrame(t, phone, packet)
@@ -238,11 +238,11 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	if err != nil || !slices.Equal(channels, []string{testChannel}) {
 		t.Fatalf("channels indexed for node-b %v, %v", channels, err)
 	}
-	if err := s.SendToChannel(ctx, testChannel, socketserver.Message{Frame: textFrame("two")}); err != nil {
+	if err := s.SendToChannel(ctx, testChannel, wskit.Message{Frame: textFrame("two")}); err != nil {
 		t.Fatal(err)
 	}
 	wantFrame(t, tablet, textFrame("two"))
-	notice := socketserver.Message{ID: "notice-id", Frame: socketserver.Frame{Type: socketserver.BinaryFrame, Data: []byte{0, 254, 0}}}
+	notice := wskit.Message{ID: "notice-id", Frame: wskit.Frame{Type: wskit.BinaryFrame, Data: []byte{0, 254, 0}}}
 	if err := s.SendToChannel(ctx, testChannel, notice); err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +258,8 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 	if err != nil || selected.EndpointID != "node-b" {
 		t.Fatalf("route after drain %+v, %v", selected, err)
 	}
-	private := socketserver.Frame{Type: socketserver.BinaryFrame, Data: []byte("priv-1\x00\xff")}
-	direct, err := s.Send(ctx, "alice", socketserver.Message{ID: "priv-1", Frame: private})
+	private := wskit.Frame{Type: wskit.BinaryFrame, Data: []byte("priv-1\x00\xff")}
+	direct, err := s.Send(ctx, "alice", wskit.Message{ID: "priv-1", Frame: private})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 		t.Fatalf("ACKs %v, %v", acked, err)
 	}
 	// A single user's devices can acknowledge the same direct message independently.
-	partial, err := s.Send(ctx, "alice", socketserver.Message{ID: "partial-1", Frame: textFrame("second private message")})
+	partial, err := s.Send(ctx, "alice", wskit.Message{ID: "partial-1", Frame: textFrame("second private message")})
 	if err != nil || !partial.Accepted {
 		t.Fatalf("partial delivery %+v, %v", partial, err)
 	}

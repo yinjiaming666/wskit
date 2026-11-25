@@ -26,16 +26,16 @@ func startNode() error {
 	grpcAddr := flag.String("grpc", "127.0.0.1:9001", "节点间推送的 gRPC 地址")
 	flag.Parse()
 
-	backend := socketserver.NewRedisBackend(socketserver.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
+	backend := wskit.NewRedisBackend(wskit.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
 	defer backend.Close()
-	sender, err := socketserver.NewSender(backend)
+	sender, err := wskit.NewSender(backend)
 	if err != nil {
 		return err
 	}
 	defer sender.Close()
 
 	const wsPath = "/ws/demo"
-	node, err := socketserver.CreateNode(socketserver.NodeConfig{
+	node, err := wskit.CreateNode(wskit.NodeConfig{
 		EndpointID: "demo",
 		WSPath:     wsPath,
 		WSAddr:     *addr,
@@ -49,7 +49,7 @@ func startNode() error {
 	mux := http.NewServeMux()
 	registerHealthRoutes(mux, node, backend.Ready)
 	mux.HandleFunc("GET "+wsPath, func(w http.ResponseWriter, r *http.Request) {
-		node.ServeWS(w, r, socketserver.SessionInfo{
+		node.ServeWS(w, r, wskit.SessionInfo{
 			UserID: r.URL.Query().Get("user"), Channels: []string{"lobby"},
 		})
 	})

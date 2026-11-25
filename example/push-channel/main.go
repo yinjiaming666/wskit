@@ -23,9 +23,9 @@ func run() error {
 	text := flag.String("text", "大家好", "广播内容")
 	flag.Parse()
 
-	backend := socketserver.NewRedisBackend(socketserver.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
+	backend := wskit.NewRedisBackend(wskit.RedisConfig{Addr: os.Getenv("REDIS_ADDR"), KeyPrefix: "socket-demo:"})
 	defer backend.Close()
-	sender, err := socketserver.NewSender(backend)
+	sender, err := wskit.NewSender(backend)
 	if err != nil {
 		return err
 	}
