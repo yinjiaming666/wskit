@@ -10,10 +10,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	websocketpb "socket_server/api/proto/websocket"
-	"socket_server/internal/domain"
-	"socket_server/internal/endpoint"
-	"socket_server/internal/grpcpush"
+	websocketpb "github.com/yinjiaming666/wskit/api/proto/websocket"
+	"github.com/yinjiaming666/wskit/internal/domain"
+	"github.com/yinjiaming666/wskit/internal/endpoint"
+	"github.com/yinjiaming666/wskit/internal/grpcpush"
 )
 
 // GRPCClient 使用 protobuf 强类型 gRPC 调用 WebSocket Node 内部推送服务。
@@ -29,7 +29,7 @@ func NewGRPCClient(endpoints endpoint.Repository) *GRPCClient {
 }
 
 // PushToConns 推送消息到指定 endpoint 上的连接。
-func (c *GRPCClient) PushToConns(ctx context.Context, endpointID string, connIDs []string, msg *domain.Message) (*domain.PushResponse, error) {
+func (c *GRPCClient) PushToConns(ctx context.Context, endpointID string, connIDs []string, msg *domain.Message) (*domain.DeliveryResult, error) {
 	client, err := c.client(ctx, endpointID)
 	if err != nil {
 		return nil, err
@@ -41,32 +41,6 @@ func (c *GRPCClient) PushToConns(ctx context.Context, endpointID string, connIDs
 		return nil, err
 	}
 	return grpcpush.PushResponseFromProto(resp), nil
-}
-
-// PushToUsers 推送消息到指定 endpoint 上的用户。
-func (c *GRPCClient) PushToUsers(ctx context.Context, endpointID string, userIDs []string, msg *domain.Message) (*domain.PushResponse, error) {
-	client, err := c.client(ctx, endpointID)
-	if err != nil {
-		return nil, err
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	resp, err := client.PushToUsers(callCtx, &websocketpb.PushToUsersRequest{UserIds: userIDs, Message: grpcpush.MessageToProto(msg)})
-	if err != nil {
-		return nil, err
-	}
-	return grpcpush.PushResponseFromProto(resp), nil
-}
-
-// Health 查询指定 endpoint 的健康状态。
-func (c *GRPCClient) Health(ctx context.Context, endpointID string) (*websocketpb.HealthResponse, error) {
-	client, err := c.client(ctx, endpointID)
-	if err != nil {
-		return nil, err
-	}
-	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	return client.Health(callCtx, &websocketpb.HealthRequest{EndpointId: endpointID})
 }
 
 // Close 关闭全部缓存的 gRPC 连接。

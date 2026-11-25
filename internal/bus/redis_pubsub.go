@@ -3,7 +3,7 @@ package bus
 import (
 	"context"
 
-	"socket_server/internal/redisclient"
+	"github.com/yinjiaming666/wskit/internal/redisclient"
 )
 
 // RedisPublisher 是 Redis 频道发布器。

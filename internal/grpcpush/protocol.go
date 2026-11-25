@@ -1,8 +1,8 @@
 package grpcpush
 
 import (
-	websocketpb "socket_server/api/proto/websocket"
-	"socket_server/internal/domain"
+	websocketpb "github.com/yinjiaming666/wskit/api/proto/websocket"
+	"github.com/yinjiaming666/wskit/internal/domain"
 )
 
 // MessageToProto 将领域消息转换为 protobuf 消息。
@@ -10,41 +10,18 @@ func MessageToProto(msg *domain.Message) *websocketpb.PushMessage {
 	if msg == nil {
 		return nil
 	}
-	// 目标连接由 PushToConnsRequest.ConnIds 单独携带，消息体不再重复传输内部路由列表。
-	return &websocketpb.PushMessage{
-		MessageId:   msg.MessageID,
-		FromUserId:  msg.FromUserID,
-		BizType:     msg.BizType,
-		Payload:     msg.Payload,
-		AckRequired: msg.AckRequired,
-		CreatedAt:   msg.CreatedAt,
-		ToUserIds:   msg.ToUserIDs,
-		GroupId:     msg.GroupID,
-		RoomId:      msg.RoomID,
-	}
+	return &websocketpb.PushMessage{MessageId: msg.MessageID, Payload: msg.Frame.Data, FrameType: uint32(msg.Frame.Type)}
 }
 
-// MessageFromProto 将 protobuf 消息转换为领域消息。
 func MessageFromProto(msg *websocketpb.PushMessage) *domain.Message {
 	if msg == nil {
 		return nil
 	}
-	return &domain.Message{
-		MessageID:   msg.GetMessageId(),
-		FromUserID:  msg.GetFromUserId(),
-		BizType:     msg.GetBizType(),
-		Payload:     msg.GetPayload(),
-		AckRequired: msg.GetAckRequired(),
-		CreatedAt:   msg.GetCreatedAt(),
-		ToUserIDs:   msg.GetToUserIds(),
-		ConnIDs:     msg.GetConnIds(),
-		GroupID:     msg.GetGroupId(),
-		RoomID:      msg.GetRoomId(),
-	}
+	return &domain.Message{MessageID: msg.GetMessageId(), Frame: domain.Frame{Type: domain.FrameType(msg.GetFrameType()), Data: msg.GetPayload()}}
 }
 
 // PushResponseToProto 将领域响应转换为 protobuf 响应。
-func PushResponseToProto(resp *domain.PushResponse) *websocketpb.PushResponse {
+func PushResponseToProto(resp *domain.DeliveryResult) *websocketpb.PushResponse {
 	if resp == nil {
 		return &websocketpb.PushResponse{Accepted: false, Reason: "nil response"}
 	}
@@ -57,11 +34,11 @@ func PushResponseToProto(resp *domain.PushResponse) *websocketpb.PushResponse {
 }
 
 // PushResponseFromProto 将 protobuf 响应转换为领域响应。
-func PushResponseFromProto(resp *websocketpb.PushResponse) *domain.PushResponse {
+func PushResponseFromProto(resp *websocketpb.PushResponse) *domain.DeliveryResult {
 	if resp == nil {
-		return &domain.PushResponse{Accepted: false, Reason: "nil response"}
+		return &domain.DeliveryResult{Accepted: false, Reason: "nil response"}
 	}
-	return &domain.PushResponse{
+	return &domain.DeliveryResult{
 		Accepted:        resp.GetAccepted(),
 		AcceptedConnIDs: resp.GetAcceptedConnIds(),
 		FailedConnIDs:   resp.GetFailedConnIds(),

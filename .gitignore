@@ -4,12 +4,7 @@
 .codegraph/
 
 # Runtime/build artifacts
-runtime/
-
-# Environment-specific config
-configs/app.json
-deploy/targets.json
-deploy/runtime.env
+/runtime/
 
 # Logs and local overrides
 *.log

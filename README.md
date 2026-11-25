@@ -1,307 +1,111 @@
-# 分布式 WebSocket 消息分发服务
+# wskit
 
-本项目是基于 **Golang + Redis + Go Gateway + gRPC** 的分布式 WebSocket 消息分发服务，用于支持多 WebSocket 节点横向扩展、客户端 endpoint 分配、多端登录、ACK、普通消息推送和直播间广播。
+`wskit` 是可嵌入 Go 项目的分布式 WebSocket 框架。使用 `CreateGateway` 分配连接节点，`CreateNode` 管理长连接和频道订阅，`NewSender` 通过 Redis 广播或 gRPC 向指定用户投递。
 
-> 当前项目保留 Gateway、Message API、WebSocket Node、Redis/gRPC/WebSocket 核心运行链路，并提供基础远程部署脚本。消息下库、离线消息补发、Kafka 超大规模广播按当前需求暂不实现。
+## 作为 Go 库接入
 
----
-
-## 核心能力
-
-```text
-1. Gateway 根据节点心跳和连接数分配 WebSocket endpoint
-2. WebSocket Node 管理真实 WebSocket 长连接、本地房间连接、客户端 ACK
-3. WebSocket Node 启动内部 gRPC 推送服务
-4. Message API 通过 gRPC 调用目标 WebSocket Node
-5. Message API 提供单聊、群聊、ACK、直播间消息入口
-6. 支持同一用户多端登录
-7. 支持 ACK pending / done / failed，并有超时扫描任务
-8. Redis 使用 github.com/redis/go-redis/v9 连接池实现
-9. 支持 Redis EndpointRepository / RouteResolver / AckStore
-10. 支持 Redis Pub/Sub 和 Redis Stream 写入与消费
-11. 支持直播间消息跨节点广播到本机房间连接
-12. 消息下库逻辑预留 MessageStore 接口，当前为空实现
-```
-
----
-
-## 架构概览
-
-```text
-Client
-  │
-  ├── GET /api/ws/route
-  │       ↓
-  │   Gateway
-  │       ↓
-  │   查询 Redis 中的 WebSocket Node 状态
-  │       ↓
-  │   返回 ws_url + route_token
-  │
-  ├── WebSocket Connect
-  │       ↓
-  │   WebSocket Node
-  │       ↓
-  │   注册连接路由到 Redis
-  │
-  └── POST /api/messages/*
-          ↓
-      Message API
-          ↓
-      查询 Redis 连接路由
-          ↓
-      gRPC 调用目标 WebSocket Node
-```
-
-直播间广播链路：
-
-```text
-WebSocket Node 首个本地成员加入
-  ↓
-Redis ZSET 注册 room_id → endpoint_id 短租约
-  ↓
-Message API 查询房间当前承载节点
-  ↓
-Redis Pub/Sub 或 Redis Stream 通知按 endpoint_id 精准扇出
-  ↓
-目标 WebSocket Node（仅订阅自己的节点频道）
-  ↓
-本节点 RoomHub
-  ↓
-房间内 WebSocket 连接
-```
-
-直播间节点租约默认 30 秒、每 10 秒续期；用户连接路由绑定同样为 30 秒，并独立每 10 秒批量续期。最后一个本地成员离开、连接断开或节点优雅停止时会立即清理；节点异常退出后，最迟约 30 秒自动排除残留绑定。
-
----
-
-## 本地运行
-
-单服务接口调试和单元测试可以使用内存实现；Gateway、Message API、WebSocket Node 分进程运行时内存状态互不共享，完整链路联调请使用 Redis 共享状态模式。
+框架要求 Go 1.25.0 或更高版本，并使用 Redis。在业务项目的模块目录安装根包。
 
 ```bash
-CONFIG_FILE=configs/app.json ENDPOINT_ID=gateway-1 go run ./cmd/gateway
-CONFIG_FILE=configs/app.json ENDPOINT_ID=message-api-1 go run ./cmd/message-api
-CONFIG_FILE=configs/app.json ENDPOINT_ID=ws-node-1 go run ./cmd/websocket-node
+go get github.com/yinjiaming666/wskit@latest
 ```
 
-共享状态模式由 `configs/app.json` 顶层的 `storage` 字段决定。完整链路联调请配置：
+```go
+import "github.com/yinjiaming666/wskit"
+```
 
-```json
-{
-  "storage": "redis"
+Go 包名是 `socketserver`。本地联调可以在业务项目的 `go.mod` 中使用 `replace` 指向框架目录。[示例模块](example/go.mod)
+
+每个进程调用 `socketserver.NewRedisBackend(socketserver.RedisConfig{Addr: redisAddr, KeyPrefix: "myapp:"})`，同一进程内的 Node、Gateway 和 Sender 可以共用这个实例。调用 `backend.Ready(ctx)` 可验证 Redis 连接。一个项目的各个进程使用同一 Redis 数据库和前缀。现有集群升级时，发送服务与 WebSocket 节点需使用兼容的 gRPC 和 Redis 消息格式，建议统一版本。多个项目共用 Redis 时各设唯一的 `KeyPrefix`，因为 Pub/Sub 频道跨逻辑数据库可见。每个运行中的 Node 使用唯一的 `EndpointID`，并将 `GRPCAddr` 配置为发送方能访问的监听地址。
+
+库负责 WebSocket 握手、连接生命周期、节点路由、频道扇出和逐连接回执。业务项目负责鉴权、订阅权限、应用消息编码与解析。`socketserver.Frame` 带有 `Type` 和 `Data`，支持 UTF-8 文本和任意二进制数据。WebSocket 协议级 Ping/Pong 由节点处理。
+
+下面的 Node 把收到的数据帧原样返回，浏览器连接时默认订阅 `lobby`。省略 `ConnID` 时，框架会为每次连接生成唯一 ID。[加入、退出和推送示例](example/README.md)
+
+```go
+func runNode(ctx context.Context, mux *http.ServeMux, backend *socketserver.Backend) error {
+    node, err := socketserver.CreateNode(socketserver.NodeConfig{
+        EndpointID: "node-a",
+        GRPCAddr:   "127.0.0.1:9001",
+        OnMessage: func(ctx context.Context, s *socketserver.Session, frame socketserver.Frame) error {
+            return s.Send(frame)
+        },
+    }, backend)
+    if err != nil {
+        return err
+    }
+    mux.HandleFunc("/ws/node-a", func(w http.ResponseWriter, r *http.Request) {
+        node.ServeWS(w, r, socketserver.SessionInfo{
+            UserID: r.URL.Query().Get("user"), Channels: []string{"lobby"},
+        })
+    })
+    return node.Run(ctx)
 }
 ```
 
-本地单进程调试或单元测试可改为 `"storage": "memory"`。
+宿主启动 HTTP 服务并处理 `node.Run(ctx)` 的返回值。节点在 gRPC 监听和 Redis 订阅就绪后注册。`node.BeginDrain(ctx)` 让已有连接继续收消息，同时停止新连接分配。取消运行上下文后，等待 `Run` 返回再关闭 Backend。`OnMessage` 返回错误会结束该连接，业务可以调用 `Session.Send` 回复自定义错误并返回 `nil`。
 
----
+| 业务操作 | Go 接口 |
+|---|---|
+| 分配连接节点 | `socketserver.CreateGateway(socketserver.GatewayConfig{PublicURL: "wss://ws.example.com"}, backend)` 创建网关。`gateway.Route(ctx, userID)` 返回节点和 WebSocket 地址。 |
+| 向频道在线订阅者广播 | `sender.SendToChannel(ctx, "group:42", msg)` 通过 Redis Pub/Sub 发布，返回发布过程的错误。客户端按原有格式接收 `msg.Frame`，无需回执。 |
+| 一对一私聊 | `sender.Send(ctx, toUserID, msg)` 通过 gRPC 投递到收件人的所有在线设备，结果列出已入队和失败的连接。消息 ID 由业务生成，包含在应用协议中。客户端回执由业务解析后调用 `Session.Ack(ctx, id)`。 |
 
-## 快速远程部署
+业务负责消息存储。聊天记录可以在发送前保存，投递流水可以在发送后按同步结果记录。私聊用 `Delivery.AcceptedConnIDs` 和 `FailedConnIDs` 区分入队情况，频道广播用返回的 `error` 判断发布结果。[Go 发送接口契约](.api/websocket-sender.md)
 
-本仓库提供本地/CI 打包、SHA256 校验、远程部署锁、WebSocket 排空、逐实例健康检查、自动回滚、发布历史和 systemd 管理。同一台服务器可以部署多个节点，每个实例会固定到不可变 release，并生成独立服务名：
+已有服务请将 `NewSenderWithStore` 改为 `NewSender`，将 `PublishStream` 调用改为 `SendToChannel`。
 
-```text
-socket-server-{service}-{endpoint_id}.service
+业务创建一个 Sender 复用到进程退出。发送文本时指定 `socketserver.TextFrame`，发送 Protobuf 等序列化结果时指定 `socketserver.BinaryFrame`。
+
+```go
+sender, err := socketserver.NewSender(backend)
+if err != nil {
+    return err
+}
+defer sender.Close()
+
+msg := socketserver.Message{
+    ID: "m42",
+    Frame: socketserver.Frame{Type: socketserver.TextFrame, Data: []byte(`{"id":"m42","text":"你好"}`)},
+}
+result, err := sender.Send(ctx, "alice", msg)
 ```
 
-初始化部署配置：
+消息 ID 用于库内跟踪投递，客户端看到的字段由 `Frame.Data` 决定。发送服务可以运行 `sender.RunAckTimeouts(ctx)` 扫描超时回执，退出时调用 `sender.Close()`。
 
-```bash
-cp configs/app.example.json configs/app.json
-cp deploy/targets.example.json deploy/targets.json
-cp deploy/runtime.env.example deploy/runtime.env
-```
+### 公开 API 与迁移
 
-部署全部目标：
+业务仅需导入根包 `socketserver`。仓储、Redis 封装、节点间传输及其适配器位于 `internal/`，不能作为独立公共组件使用。`Frame`、`FrameType`、`RedisConfig` 和 `DeliveryResult` 在根包提供稳定名称；内部共用类型定义，不反向依赖根包。
 
-```bash
-go run ./cmd/deployctl plan all
-go run ./cmd/deployctl deploy all
-```
+| 原入口 | 迁移方式 |
+|---|---|
+| `domain.SendResult`、`domain.PushResponse` | 统一使用 `socketserver.DeliveryResult`。`Node.PushToConns`、`Node.PushToUsers` 返回 `*DeliveryResult`。protobuf 的 `PushResponse` 仅用于 gRPC 边界。 |
+| `Delivery` 中重复的结果字段 | 改为嵌入 `DeliveryResult`，保留 `MessageID`。读取 `result.Accepted` 等字段的代码不变；结构体字面量改为 `Delivery{MessageID: id, DeliveryResult: socketserver.DeliveryResult{Accepted: true}}`。 |
+| `backend.Endpoints()`、`Routes()`、`Channels()` | 删除仓储访问器。分配节点用 `Gateway.Route`，投递用 `Sender.Send` / `SendToChannel`，本地订阅用 `Node` / `Session` 的 `Subscribe`、`Unsubscribe`。节点注册和路由租约由 `Node.Run` 维护，不提供原始仓储读写替代接口。 |
+| `backend.Acks()` | 查询用 `Sender.PendingConnections`、`AckedConnections`、`FailedConnections`；登记客户端回执用 `Session.Ack` / `Node.Ack`，超时扫描用 `Sender.RunAckTimeouts`。不公开底层状态写入接口。 |
+| `bus`、`push`、`sender`、`redisclient` 等子包 | 改用根包 `NewRedisBackend`、`NewSender` 和 `CreateNode`；删除无调用的传输包装层与 `message.EnsureMessageID`，消息 ID 由业务生成。 |
+| `NewClient`、`NewRoomHub` | 本地连接和频道订阅映射改为私有实现，业务通过 `Session` / `Node` 操作。 |
+| `httpx.ServeHTTP` / `ServeHTTPContext`、`HTTPServerConfig` | 宿主创建 `http.Server` 并管理信号和优雅退出，参见示例。 |
+| `Node.RegisterHealthRoutes`、`HealthResponse` | 宿主注册路由并定义响应，结合 `Node.Ready()`、`Node.ConnCount()` 和 `Backend.Ready(ctx)` 查询状态。 |
 
-也可以用快捷写法：
+`DeliveryResult.Accepted` 表示所有已解析目标连接均入队成功；无在线连接时仍为 `true`，两组连接列表为空。它不表示 WebSocket 写入完成或客户端确认。`FailedConnections` 查询回执跟踪的失败状态，与同步结果中的 `FailedConnIDs`（入队失败）分开使用。
 
-```bash
-go run ./cmd/deployctl all
-```
+### 宿主生命周期
 
-部署单台服务器：
+库不启动 HTTP 服务、不注册固定健康路由，也不监听进程信号。宿主用 `signal.NotifyContext` 协调 HTTP 服务与 `Node.Run`：任一运行失败就取消共同上下文，等待 HTTP 关闭和 `Node.Run` 清理完成后，再关闭 Sender 和 Backend。HTTP 关闭保留示例原有的 10 秒宽限期；WebSocket 连接、节点注册、连接路由和频道租约仍由 `Node.Run` 清理。
 
-```bash
-RELEASE_VERSION=v2026.07.11 GIT_COMMIT="$(git rev-parse HEAD)" \
-  go run ./cmd/deployctl deploy ws-server-1
-```
+`Node.Ready()` 表示节点正在运行且可接收新连接；启动前、排空中和停止后返回 `false`。宿主可另外调用 `Backend.Ready(ctx)` 检查 Redis 连通性，使用 `Node.ConnCount()` 获取本地连接数。示例选择 `/healthz` 作为存活探针、`/readyz` 作为就绪探针，路径、HTTP 状态码和 JSON 均属于示例宿主。[生命周期与健康检查契约](.api/host-lifecycle.md)
 
-查看发布历史或回滚整台物理主机：
+## 可运行的示例
 
-```bash
-go run ./cmd/deployctl history ws-server-1
-go run ./cmd/deployctl rollback ws-server-1
-```
-
-WebSocket Node 发布前通过 `SIGUSR1` 进入 draining，默认等待 30 秒。三类服务统一使用 `/readyz` 作为发布门禁并检查 Redis 等关键依赖，`/healthz` 只表示进程存活；后续主机发布失败时，已完成主机会逆序回滚。
-
-本地远程管理：
-
-```bash
-go run ./cmd/deployctl help list
-go run ./cmd/deployctl list ws-server-1
-go run ./cmd/deployctl list ws-server-1 websocket-node ws-node-1
-go run ./cmd/deployctl pause ws-server-1 websocket-node ws-node-1
-go run ./cmd/deployctl start ws-server-1 websocket-node ws-node-1
-go run ./cmd/deployctl logs ws-server-1 websocket-node ws-node-1
-```
-
-`list` 会以统一表格输出 `SERVER`、`SERVICE`、`ENDPOINT`、`HOST`、`DEPLOY_DIR`、`PORT`、`IP`、`STATUS` 和 `UPDATED_AT`。其中 WebSocket Node 的 `PORT` 为 HTTP/gRPC 端口组合，`IP` 为应用配置中的 HTTP/WS 监听地址；`status` 已合并为 `list` 的兼容别名。
-
-`STATUS` 使用 Docker 风格状态：`running`、`starting`、`restarting`、`stopping`、`stopped`、`failed`。其中 systemd 的 `activating` 会显示为 `starting`，若其子状态为 `auto-restart` 则显示为 `restarting`；`not-found` 表示有部署记录但 unit 文件不存在，`not-deployed` 表示没有部署记录，`unknown` 表示无法取得可识别的 systemd 状态。
-
-如果服务器上仍是旧版稳定脚本，可先同步 `socketctl` 和 `install-instance`，不会构建、部署或重启任何服务；旧服务器首次使用新版回滚前也应执行一次：
-
-```bash
-go run ./cmd/deployctl syncctl all
-```
-
-部署完成后，服务器本地也会有管理脚本：
-
-```bash
-/opt/socket-server/socketctl list
-/opt/socket-server/socketctl help
-/opt/socket-server/socketctl status
-/opt/socket-server/socketctl pause websocket-node ws-node-1
-```
-
-自动化入口：
-
-```text
-deploy/ci-deploy.sh              手工或任意 CI 平台的滚动发布入口
-.github/workflows/ci.yml         自动测试
-```
-
-生产配置和 SSH 密钥由 CI Secret 注入，不会上传包含运行配置的发布包作为流水线 Artifact。详细说明见 `deploy/QUICK_DEPLOY.md`。
-
----
-
-## gRPC 说明
-
-当前已经接入官方 `google.golang.org/grpc`，并使用 protobuf 消息结构：
-
-```text
-api/proto/websocket/websocket.pb.go       protobuf 消息结构
-api/proto/websocket/websocket_grpc.pb.go  gRPC client/server 接口
-internal/grpcpush/protocol.go             domain 与 protobuf 转换
-internal/push/grpc_client.go              Message API gRPC client
-internal/websocket/grpc_server.go         WebSocket Node gRPC server
-```
-
-说明：当前 pb 文件已和 `api/proto/websocket.proto` 对齐。后续如果调整 proto，需要重新生成或同步更新 pb 文件。
-
----
-
-## WebSocket 客户端消息
-
-客户端通过 Gateway 获取连接地址：
-
-```http
-GET /api/ws/route
-```
-
-连接 WebSocket 后，所有 JSON 包统一使用 `c / m / data` 信封，其中 `c` 固定为 `socket_server`，`m` 对应原来的 `type`，具体参数放入 `data`：
-
-```json
-{"c":"socket_server","m":"ping","data":{}}
-```
-
-```json
-{"c":"socket_server","m":"join_room","data":{"room_id":"room-1"}}
-```
-
-```json
-{"c":"socket_server","m":"leave_room","data":{"room_id":"room-1"}}
-```
-
-```json
-{"c":"socket_server","m":"ack","data":{"message_id":"msg-1"}}
-```
-
-服务端业务推送使用 `m: "message"`，原有消息字段均位于 `data`；协议错误则返回 `m: "error"`，心跳响应返回 `m: "pong"`。
-
-WebSocket 已包含基础生产增强：
-
-```text
-读超时
-写超时
-最大帧大小限制
-服务端主动 ping
-断开自动清理连接路由
-慢客户端发送队列保护
-```
-
----
-
-## 模拟测试客户端
-
-`cmd/simulator` 可以批量获取 Gateway 路由、建立 WebSocket 连接、加入直播间，并周期发送单聊、群聊和直播消息。收到需要 ACK 的消息后会自动回 ACK，结束时输出连接数、收发量和失败数。
-
-单节点本地测试：
-
-```bash
-go run ./cmd/simulator \
-  -gateway http://127.0.0.1:7000 \
-  -message-api http://127.0.0.1:7100 \
-  -ws-base ws://127.0.0.1:8081 \
-  -users 100 \
-  -connections-per-user 2 \
-  -duration 1m
-```
-
-如果 Gateway 返回的 `ws_url` 已经可以直接访问，不需要设置 `-ws-base`。常用参数：
-
-```text
--users                 模拟用户数
--connections-per-user  每个用户的连接数
--connect-concurrency   建连并发数
--group-size            群消息成员数量
--single-interval       单聊发送间隔，0 表示关闭
--group-interval        群聊发送间隔，0 表示关闭
--live-interval         直播消息发送间隔，0 表示关闭
--verbose               输出单条失败日志
-```
-
-自动端到端测试会覆盖 Gateway 路由、WebSocket 握手、消息推送和客户端 ACK：
-
-```bash
-go test ./internal/websocket -run TestEndToEndRoutePushAndAck
-```
-
----
-
-## 当前不实现的模块
-
-按当前需求，以下模块暂时不做：
-
-```text
-1. 消息下库
-2. 离线消息补发
-3. Kafka 超大规模广播
-4. 部署 UI
-```
-
----
+独立模块 `example/` 演示 Gateway 和 Node 启动、HTML + JavaScript 客户端连接与断开、加入和退出频道，以及客户端发消息和服务端主动推送。可以连接 Alice 和 Bob，验证一对一私聊和频道广播的接收范围。[示例说明](example/README.md)
 
 ## 测试
 
+所有测试文件都在 `test/`。框架内部测试和示例节点的 HTTP 健康检查测试通过 Go overlay 在各自的包内执行。在仓库根目录运行测试，`-count=1` 确保修改示例代码后重新执行测试。设置 `WS_TEST_REDIS_ADDR` 会额外运行双节点 Redis/gRPC 集成测试。
+
 ```bash
-go mod tidy
-go test ./...
-```
-
----
-
-## 文档入口
-
-```text
-configs/README.md
-dev.md
+go test -count=1 ./...
+WS_TEST_REDIS_ADDR=127.0.0.1:6379 go test -count=1 -race ./...
+go -C example build ./...
 ```

@@ -2,30 +2,16 @@ syntax = "proto3";
 
 package websocket.v1;
 
-option go_package = "socket_server/api/proto/websocket;websocketpb";
+option go_package = "github.com/yinjiaming666/wskit/api/proto/websocket;websocketpb";
 
 // PushMessage 表示内部推送消息。
 message PushMessage {
-  // message_id 表示消息唯一编号。
   string message_id = 1;
-  // from_user_id 表示发送方用户编号。
-  string from_user_id = 2;
-  // biz_type 表示业务类型，例如 single、group、live、system。
-  string biz_type = 3;
-  // payload 表示序列化后的业务消息体。
+  // payload contains the exact bytes delivered to the client.
   bytes payload = 4;
-  // ack_required 表示客户端是否需要 ACK。
-  bool ack_required = 5;
-  // created_at 表示消息创建时间戳，单位秒。
-  int64 created_at = 6;
-  // to_user_ids 表示目标用户编号列表，供客户端还原单聊/群聊上下文。
-  repeated string to_user_ids = 7;
-  // conn_ids 表示本次内部推送的目标连接编号列表。
-  repeated string conn_ids = 8;
-  // group_id 表示群聊编号。
-  string group_id = 9;
-  // room_id 表示直播间编号。
-  string room_id = 10;
+  // frame_type is the WebSocket text (1) or binary (2) opcode.
+  uint32 frame_type = 11;
+  reserved 2, 3, 5 to 10;
 }
 
 // PushToConnsRequest 表示按连接推送请求。

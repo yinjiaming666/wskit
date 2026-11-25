@@ -17,16 +17,9 @@ type PushMessage struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	MessageId   string   `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	FromUserId  string   `protobuf:"bytes,2,opt,name=from_user_id,json=fromUserId,proto3" json:"from_user_id,omitempty"`
-	BizType     string   `protobuf:"bytes,3,opt,name=biz_type,json=bizType,proto3" json:"biz_type,omitempty"`
-	Payload     []byte   `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	AckRequired bool     `protobuf:"varint,5,opt,name=ack_required,json=ackRequired,proto3" json:"ack_required,omitempty"`
-	CreatedAt   int64    `protobuf:"varint,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	ToUserIds   []string `protobuf:"bytes,7,rep,name=to_user_ids,json=toUserIds,proto3" json:"to_user_ids,omitempty"`
-	ConnIds     []string `protobuf:"bytes,8,rep,name=conn_ids,json=connIds,proto3" json:"conn_ids,omitempty"`
-	GroupId     string   `protobuf:"bytes,9,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	RoomId      string   `protobuf:"bytes,10,opt,name=room_id,json=roomId,proto3" json:"room_id,omitempty"`
+	MessageId string `protobuf:"bytes,1,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
+	Payload   []byte `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	FrameType uint32 `protobuf:"varint,11,opt,name=frame_type,json=frameType,proto3" json:"frame_type,omitempty"`
 }
 
 func (x *PushMessage) Reset() {
@@ -56,62 +49,21 @@ func (x *PushMessage) GetMessageId() string {
 	}
 	return ""
 }
-func (x *PushMessage) GetFromUserId() string {
-	if x != nil {
-		return x.FromUserId
-	}
-	return ""
-}
-func (x *PushMessage) GetBizType() string {
-	if x != nil {
-		return x.BizType
-	}
-	return ""
-}
 func (x *PushMessage) GetPayload() []byte {
 	if x != nil {
 		return x.Payload
 	}
 	return nil
 }
-func (x *PushMessage) GetAckRequired() bool {
+
+func (x *PushMessage) GetFrameType() uint32 {
 	if x != nil {
-		return x.AckRequired
-	}
-	return false
-}
-func (x *PushMessage) GetCreatedAt() int64 {
-	if x != nil {
-		return x.CreatedAt
+		return x.FrameType
 	}
 	return 0
 }
-func (x *PushMessage) GetToUserIds() []string {
-	if x != nil {
-		return x.ToUserIds
-	}
-	return nil
-}
-func (x *PushMessage) GetConnIds() []string {
-	if x != nil {
-		return x.ConnIds
-	}
-	return nil
-}
-func (x *PushMessage) GetGroupId() string {
-	if x != nil {
-		return x.GroupId
-	}
-	return ""
-}
-func (x *PushMessage) GetRoomId() string {
-	if x != nil {
-		return x.RoomId
-	}
-	return ""
-}
 
-// PushToConnsRequest 表示按连接推送请求。
+// PushToConnsRequest identifies the target connections.
 type PushToConnsRequest struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -451,13 +403,17 @@ func websocketRawDescriptor() []byte {
 	tBool := descriptorpb.FieldDescriptorProto_TYPE_BOOL
 	tInt64 := descriptorpb.FieldDescriptorProto_TYPE_INT64
 	tMessage := descriptorpb.FieldDescriptorProto_TYPE_MESSAGE
+	pushMessage := msg("PushMessage", field("message_id", 1, optional, tString, ""), field("payload", 4, optional, tBytes, ""), field("frame_type", 11, optional, descriptorpb.FieldDescriptorProto_TYPE_UINT32, ""))
+	pushMessage.ReservedRange = []*descriptorpb.DescriptorProto_ReservedRange{
+		{Start: proto.Int32(2), End: proto.Int32(4)}, {Start: proto.Int32(5), End: proto.Int32(11)},
+	}
 	fd := &descriptorpb.FileDescriptorProto{
 		Name:    proto.String("api/proto/websocket.proto"),
 		Package: proto.String("websocket.v1"),
 		Syntax:  proto.String("proto3"),
-		Options: &descriptorpb.FileOptions{GoPackage: proto.String("socket_server/api/proto/websocket;websocketpb")},
+		Options: &descriptorpb.FileOptions{GoPackage: proto.String("github.com/yinjiaming666/wskit/api/proto/websocket;websocketpb")},
 		MessageType: []*descriptorpb.DescriptorProto{
-			msg("PushMessage", field("message_id", 1, optional, tString, ""), field("from_user_id", 2, optional, tString, ""), field("biz_type", 3, optional, tString, ""), field("payload", 4, optional, tBytes, ""), field("ack_required", 5, optional, tBool, ""), field("created_at", 6, optional, tInt64, ""), field("to_user_ids", 7, repeated, tString, ""), field("conn_ids", 8, repeated, tString, ""), field("group_id", 9, optional, tString, ""), field("room_id", 10, optional, tString, "")),
+			pushMessage,
 			msg("PushToConnsRequest", field("conn_ids", 1, repeated, tString, ""), field("message", 2, optional, tMessage, ".websocket.v1.PushMessage")),
 			msg("PushToUsersRequest", field("user_ids", 1, repeated, tString, ""), field("message", 2, optional, tMessage, ".websocket.v1.PushMessage")),
 			msg("PushResponse", field("accepted", 1, optional, tBool, ""), field("accepted_conn_ids", 2, repeated, tString, ""), field("failed_conn_ids", 3, repeated, tString, ""), field("reason", 4, optional, tString, "")),

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"socket_server/internal/redisclient"
-	"socket_server/internal/rediskey"
+	"github.com/yinjiaming666/wskit/internal/redisclient"
+	"github.com/yinjiaming666/wskit/internal/rediskey"
 )
 
 const (

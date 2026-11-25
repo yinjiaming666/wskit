@@ -7,9 +7,9 @@ import (
 	"sort"
 	"time"
 
-	"socket_server/internal/domain"
-	"socket_server/internal/redisclient"
-	"socket_server/internal/rediskey"
+	"github.com/yinjiaming666/wskit/internal/domain"
+	"github.com/yinjiaming666/wskit/internal/redisclient"
+	"github.com/yinjiaming666/wskit/internal/rediskey"
 )
 
 // ErrEndpointNotFound 表示节点确实不存在。

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	redis "github.com/redis/go-redis/v9"
+
+	"github.com/yinjiaming666/wskit/internal/rediskey"
 )
 
 // Config 表示 Redis 客户端配置。
@@ -155,13 +157,16 @@ func (c *Client) Pipeline(ctx context.Context, commands ...[]string) error {
 	return err
 }
 
-// SubscribePattern 使用 Redis PSUBSCRIBE 订阅频道模式。
-func (c *Client) SubscribePattern(ctx context.Context, pattern string, handler func(channel string, payload []byte)) error {
-	pubSub := c.client.PSubscribe(ctx, c.Key(pattern))
+// SubscribePatternReady calls ready after Redis acknowledges PSUBSCRIBE.
+func (c *Client) SubscribePatternReady(ctx context.Context, pattern string, ready func(), handler func(string, []byte)) error {
+	pubSub := c.client.PSubscribe(ctx, rediskey.EscapePatternLiteral(c.config.KeyPrefix)+pattern)
 	defer pubSub.Close()
 
 	if _, err := pubSub.Receive(ctx); err != nil {
 		return err
+	}
+	if ready != nil {
+		ready()
 	}
 	channel := pubSub.Channel()
 	for {

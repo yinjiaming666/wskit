@@ -18,6 +18,11 @@ type TimeoutWorkerConfig struct {
 
 // StartTimeoutWorker 启动 ACK 超时扫描任务。
 func StartTimeoutWorker(ctx context.Context, store TimeoutStore, config TimeoutWorkerConfig) {
+	go RunTimeoutWorker(ctx, store, config)
+}
+
+// RunTimeoutWorker scans until ctx is canceled.
+func RunTimeoutWorker(ctx context.Context, store TimeoutStore, config TimeoutWorkerConfig) {
 	if store == nil {
 		return
 	}
@@ -32,17 +37,15 @@ func StartTimeoutWorker(ctx context.Context, store TimeoutStore, config TimeoutW
 	}
 
 	ticker := time.NewTicker(config.Interval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				expirePending(ctx, store, config)
-			}
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			expirePending(ctx, store, config)
 		}
-	}()
+	}
 }
 
 // expirePending 将超时 pending 标记为失败。

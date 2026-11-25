@@ -1,6 +1,14 @@
 package rediskey
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+var globEscaper = strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`, "]", `\]`)
+
+// EscapePatternLiteral preserves a literal namespace or node ID in a Redis glob.
+func EscapePatternLiteral(value string) string { return globEscaper.Replace(value) }
 
 // EndpointsKey 返回 WebSocket endpoint 列表 Key。
 func EndpointsKey() string {
@@ -47,42 +55,22 @@ func AckFailedKey(messageID string) string {
 	return fmt.Sprintf("ack:msg:%s:failed", messageID)
 }
 
-// LiveRoomChannel 返回直播间 Redis Pub/Sub 频道。
-func LiveRoomChannel(roomID string) string {
-	return fmt.Sprintf("live:room:%s", roomID)
+// ChannelNodesKey 返回频道承载节点租约有序集合 Key。
+func ChannelNodesKey(channelID string) string {
+	return fmt.Sprintf("live:channel:%s:nodes", channelID)
 }
 
-// LiveRoomStream 返回直播间 Redis Stream Key。
-func LiveRoomStream(roomID string) string {
-	return fmt.Sprintf("stream:live:room:%s", roomID)
+// NodeChannelsKey 返回节点承载频道反向索引集合 Key。
+func NodeChannelsKey(endpointID string) string {
+	return fmt.Sprintf("live:node:%s:channels", endpointID)
 }
 
-// LiveRoomNodesKey 返回直播间承载节点租约有序集合 Key。
-func LiveRoomNodesKey(roomID string) string {
-	return fmt.Sprintf("live:room:%s:nodes", roomID)
+// NodeChannelTopic 返回指定节点接收频道广播时使用的 Redis Pub/Sub 频道名。
+func NodeChannelTopic(endpointID string, channelID string) string {
+	return fmt.Sprintf("live:node:%s:channel:%s", endpointID, channelID)
 }
 
-// LiveNodeRoomsKey 返回节点承载直播间反向索引集合 Key。
-func LiveNodeRoomsKey(endpointID string) string {
-	return fmt.Sprintf("live:node:%s:rooms", endpointID)
-}
-
-// LiveNodeRoomChannel 返回仅由指定节点消费的直播间 Pub/Sub 频道。
-func LiveNodeRoomChannel(endpointID string, roomID string) string {
-	return fmt.Sprintf("live:node:%s:room:%s", endpointID, roomID)
-}
-
-// LiveNodeRoomChannelPattern 返回指定节点的直播间 Pub/Sub 订阅模式。
-func LiveNodeRoomChannelPattern(endpointID string) string {
-	return fmt.Sprintf("live:node:%s:room:*", endpointID)
-}
-
-// LiveNodeRoomStreamChannel 返回仅由指定节点消费的重要直播消息通知频道。
-func LiveNodeRoomStreamChannel(endpointID string, roomID string) string {
-	return fmt.Sprintf("stream:live:node:%s:room:%s", endpointID, roomID)
-}
-
-// LiveNodeRoomStreamChannelPattern 返回指定节点的重要直播消息订阅模式。
-func LiveNodeRoomStreamChannelPattern(endpointID string) string {
-	return fmt.Sprintf("stream:live:node:%s:room:*", endpointID)
+// NodeChannelTopicPattern 返回指定节点订阅频道广播时使用的 Redis Pub/Sub 匹配模式。
+func NodeChannelTopicPattern(endpointID string) string {
+	return NodeChannelTopic(EscapePatternLiteral(endpointID), "*")
 }

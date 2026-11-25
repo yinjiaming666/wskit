@@ -16,6 +16,14 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 2s --health-retries 10
+    env:
+      WS_TEST_REDIS_ADDR: 127.0.0.1:6379
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,6 +33,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.sum
+            example/go.sum
 
-      - name: Test
-        run: go test ./...
+      - name: Test framework and demo hosts
+        run: go test -count=1 -race ./...
+
+      - name: Build demos
+        working-directory: example
+        run: go build ./...

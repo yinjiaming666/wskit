@@ -1,4 +1,4 @@
-module socket_server
+module github.com/yinjiaming666/wskit
 
 go 1.25.0
 

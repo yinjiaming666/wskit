@@ -1,12 +1,13 @@
 # API：WebSocket Node 内部推送 gRPC
 
 ## 摘要
-- 用途：Message API 通过 gRPC 将消息投递到目标 WebSocket Node。
-- 后端文件：`api/proto/websocket.proto`、`internal/grpcpush/protocol.go`、`internal/websocket/grpc_server.go`
+- 用途：发送器通过 gRPC 将消息投递到目标 WebSocket Node。
+- 后端文件：`api/proto/websocket.proto`、`internal/grpcpush/protocol.go`、`grpc_server.go`
 - 状态：active
 
 ## 调用方式
 - 方法/协议：gRPC
+- Go protobuf 包路径为 `github.com/yinjiaming666/wskit/api/proto/websocket`。
 - Procedure：`websocket.v1.WebSocketPushService/PushToConns`、`PushToUsers`、`Health`
 - 鉴权：当前实现使用内网/防火墙边界，gRPC 本身未启用 mTLS 或 token。
 - Content-Type：`application/grpc`
@@ -15,15 +16,9 @@
 ```proto
 message PushMessage {
   string message_id = 1;
-  string from_user_id = 2;
-  string biz_type = 3;
   bytes payload = 4;
-  bool ack_required = 5;
-  int64 created_at = 6;
-  repeated string to_user_ids = 7;
-  repeated string conn_ids = 8;
-  string group_id = 9;
-  string room_id = 10;
+  uint32 frame_type = 11;
+  reserved 2, 3, 5 to 10;
 }
 
 message PushToConnsRequest {
@@ -61,5 +56,6 @@ message HealthResponse {
 gRPC 调用错误直接返回为 RPC error；业务失败通过 `PushResponse.accepted=false`、`failed_conn_ids` 和 `reason` 表达。
 
 ## 备注
-- `PushMessage` 必须保留 `group_id`、`room_id`、`to_user_ids`、`conn_ids`，避免 Message API 到 Node 的转换丢失客户端会话上下文。
-- Node 写入本地连接发送队列成功只代表 Node 已接受，不代表客户端已经 ACK。
+- `payload` 是业务编码的原始字节，`frame_type` 指定文本或二进制帧。目标连接或用户由外层请求指定。
+- Node 写入本地连接发送队列成功只代表 Node 已接受，不代表 WebSocket 写入完成，也不代表客户端已经 ACK。
+- Go 内部统一使用 `DeliveryResult`，protobuf `PushResponse` 保留在协议边界；本次没有更改 RPC、字段编号、序列化或传输方案。
