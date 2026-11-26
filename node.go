@@ -40,7 +40,7 @@ func CreateNode(cfg NodeConfig, backend *Backend) (*Node, error) {
 	if cfg.GRPCAddr == "" {
 		return nil, errors.New("GRPCAddr is required")
 	}
-	core := newNodeCore(cfg, backend.endpoints, backend.routes, backend.acks)
+	core := newNodeCore(cfg, backend.endpoints, backend.routes)
 	core.SetChannelRegistry(backend.channels)
 	return &Node{core: core, handler: newNodeHandler(core), backend: backend}, nil
 }
@@ -132,9 +132,20 @@ func (n *Node) Unsubscribe(ctx context.Context, connID, channel string) error {
 	return n.core.Unsubscribe(ctx, connID, channel)
 }
 
-// Ack records a receipt for a specific local connection.
-func (n *Node) Ack(ctx context.Context, connID, messageID string) error {
-	return n.core.HandleClientAck(ctx, messageID, connID)
+// UserIDForConn returns the user of a local connection.
+func (n *Node) UserIDForConn(connID string) (string, bool) {
+	n.core.mu.RLock()
+	defer n.core.mu.RUnlock()
+	client := n.core.clients[connID]
+	if client == nil {
+		return "", false
+	}
+	select {
+	case <-client.Done():
+		return "", false
+	default:
+		return client.UserID, true
+	}
 }
 
 // PushToConns and PushToUsers enqueue a host-encoded frame on this node.

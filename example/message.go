@@ -6,7 +6,7 @@ import (
 	"github.com/yinjiaming666/wskit"
 )
 
-// TextMessage 把示例文本编码为 WebSocket 帧。私聊传入消息 ID，浏览器用它确认收件。
+// TextMessage 把示例文本和可选消息编号编码为 WebSocket 帧。
 func TextMessage(text, id string) wskit.Message {
 	payload := struct {
 		Text string `json:"text"`

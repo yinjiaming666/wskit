@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yinjiaming666/wskit/internal/ack"
 	"github.com/yinjiaming666/wskit/internal/channel"
 	"github.com/yinjiaming666/wskit/internal/domain"
 	"github.com/yinjiaming666/wskit/internal/endpoint"
@@ -32,6 +31,10 @@ type NodeConfig struct {
 	MaxConn           int64
 	SendBuffer        int
 	HeartbeatInterval time.Duration
+
+	// BeforePush runs once per direct push with local recipients before enqueueing.
+	// The frame is read-only. Returning an error aborts the push.
+	BeforePush func(context.Context, Frame, []SessionInfo) error
 }
 
 // nodeCore 表示一个 WebSocket 长连接节点。
@@ -39,7 +42,6 @@ type nodeCore struct {
 	config           NodeConfig
 	endpointRepo     endpoint.Repository
 	routeResolver    route.Resolver
-	ackStore         ack.Store
 	heartbeatMu      sync.Mutex
 	workers          sync.WaitGroup
 	channelHub       *channelHub
@@ -60,7 +62,7 @@ type nodeCore struct {
 }
 
 // newNodeCore 创建 WebSocket Node。
-func newNodeCore(config NodeConfig, endpointRepo endpoint.Repository, routeResolver route.Resolver, ackStore ack.Store) *nodeCore {
+func newNodeCore(config NodeConfig, endpointRepo endpoint.Repository, routeResolver route.Resolver) *nodeCore {
 	if config.MaxConn <= 0 {
 		config.MaxConn = 50000
 	}
@@ -70,7 +72,7 @@ func newNodeCore(config NodeConfig, endpointRepo endpoint.Repository, routeResol
 	if config.HeartbeatInterval <= 0 {
 		config.HeartbeatInterval = 15 * time.Second
 	}
-	return &nodeCore{config: config, endpointRepo: endpointRepo, routeResolver: routeResolver, ackStore: ackStore, channelHub: newChannelHub(), clients: make(map[string]*localClient), userConns: make(map[string]map[string]struct{}), stopCh: make(chan struct{}), grpcFailure: make(chan struct{})}
+	return &nodeCore{config: config, endpointRepo: endpointRepo, routeResolver: routeResolver, channelHub: newChannelHub(), clients: make(map[string]*localClient), userConns: make(map[string]map[string]struct{}), stopCh: make(chan struct{}), grpcFailure: make(chan struct{})}
 }
 
 // SetChannelRegistry 在 Start 之前设置频道节点租约表。
@@ -467,11 +469,33 @@ func (n *nodeCore) PushToConns(ctx context.Context, connIDs []string, msg *domai
 	if err := msg.Frame.Validate(); err != nil {
 		return nil, err
 	}
+	clients := make([]*localClient, len(connIDs))
+	n.mu.RLock()
+	for i, connID := range connIDs {
+		clients[i] = n.clients[connID]
+	}
+	n.mu.RUnlock()
+
+	if beforePush := n.config.BeforePush; beforePush != nil {
+		recipients := make([]SessionInfo, 0, len(clients))
+		for _, client := range clients {
+			if client != nil {
+				recipients = append(recipients, SessionInfo{
+					ConnID: client.ConnID, UserID: client.UserID,
+					DeviceID: client.DeviceID, Platform: client.Platform,
+				})
+			}
+		}
+		if len(recipients) != 0 {
+			if err := beforePush(ctx, msg.Frame, recipients); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	resp := &domain.DeliveryResult{Accepted: true}
-	for _, connID := range connIDs {
-		n.mu.RLock()
-		client := n.clients[connID]
-		n.mu.RUnlock()
+	for i, connID := range connIDs {
+		client := clients[i]
 		if client == nil || !client.Enqueue(msg.Frame) {
 			resp.FailedConnIDs = append(resp.FailedConnIDs, connID)
 			continue
@@ -499,20 +523,6 @@ func (n *nodeCore) PushToUsers(ctx context.Context, userIDs []string, msg *domai
 	}
 	n.mu.RUnlock()
 	return n.PushToConns(ctx, connIDs, msg)
-}
-
-// HandleClientAck 处理客户端通过 WebSocket 上报的 ACK。
-func (n *nodeCore) HandleClientAck(ctx context.Context, messageID string, connID string) error {
-	if messageID == "" || connID == "" {
-		return errors.New("ack message_id or conn_id is empty")
-	}
-	n.mu.RLock()
-	clientExists := n.clients[connID] != nil
-	n.mu.RUnlock()
-	if !clientExists {
-		return errors.New("conn not found")
-	}
-	return n.ackStore.MarkDone(ctx, messageID, connID)
 }
 
 // ConnCount 返回当前节点本地连接数量。

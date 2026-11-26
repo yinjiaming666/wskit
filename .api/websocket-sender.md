@@ -6,12 +6,9 @@
 
 `sender.Send(ctx, toUserID, msg) (wskit.Delivery, error)` 向该用户的所有在线连接投递。
 
-- `toUserID` 和 `msg.ID` 必填。`msg.Frame` 是业务编码的文本或二进制帧。要让客户端确认消息，业务协议需在帧中携带消息 ID。
-- 参数校验、路由查询或登记待确认连接出错时返回 `error`。业务拿到 `nil` 错误后应继续读取 `Delivery`。
-- `Delivery.MessageID` 是传入的消息 ID（返回校验或依赖错误时也保留）。`Delivery` 嵌入共享的 `wskit.DeliveryResult`。`AcceptedConnIDs` 列出已入队的连接，`FailedConnIDs` 列出投递失败的连接。部分成功时两个列表都有值，`Accepted` 为 `false`，`Reason` 提供失败原因。用户没有在线连接时 `Accepted=true`，两个列表都为空。节点间传输错误或缺失响应按失败连接汇总到结果，`error` 仍可为 `nil`；它不表示 WebSocket 写入成功或客户端确认。
-- `sender.PendingConnections(ctx, messageID)`、`AckedConnections`、`FailedConnections` 均返回 `([]string, error)`，分别查询待回执、已确认、回执跟踪失败的连接。查询失败时返回存储错误；各查询独立读取，不构成原子快照。回执跟踪失败与同步投递结果的 `FailedConnIDs` 含义不同。
-- 客户端实际确认由 `Session.Ack(ctx, messageID)` 单独登记，业务可通过 `sender.AckedConnections(ctx, messageID)` 查询。[节点 gRPC 契约](websocket-push-grpc.md)
-
+- `toUserID` 必填。`msg.ID` 是可选业务编号。`msg.Frame` 是业务编码的文本或二进制帧。
+- 参数校验或路由查询出错时返回 `error`。业务拿到 `nil` 错误后应继续读取 `Delivery`。
+- `Delivery.MessageID` 是传入的消息 ID（返回校验或依赖错误时也保留）。`Delivery` 嵌入共享的 `wskit.DeliveryResult`。`AcceptedConnIDs` 列出已入队的连接，`FailedConnIDs` 列出投递失败的连接。部分成功时两个列表都有值，`Accepted` 为 `false`，`Reason` 提供失败原因。用户没有在线连接时 `Accepted=true`，两个列表都为空。节点间传输错误或缺失响应按失败连接汇总到结果，`error` 仍可为 `nil`。WebSocket 写入在入队后异步执行。
 ## 频道订阅
 
 宿主授权后，通过 `Session.Subscribe(ctx, channel)` 或 `Node.Subscribe(ctx, connID, channel)` 添加订阅，通过对应的 `Unsubscribe` 取消订阅。`SessionInfo.Channels` 可指定已授权的初始订阅。
@@ -24,7 +21,7 @@
 `sender.SendToChannel(ctx, channel, msg) error` 通过 Redis Pub/Sub 通知当前承载频道的节点。
 
 - `channel` 长度为 1 至 128 字节。`msg.Frame.Type` 支持 `TextFrame` 和 `BinaryFrame`，文本数据须为有效 UTF-8。订阅者收到原始帧的类型和字节。
-- 频道消息可省略 `msg.ID`。业务填写该字段也不会产生客户端回执要求。
+- 频道消息可省略 `msg.ID`。
 - 返回 `nil` 表示发布流程完成，频道没有在线订阅者时也可返回 `nil`。参数、路由查询或 Redis 发布失败时返回 `error`。频道发送结果的粒度是一次发布。
 
 框架在键名和 Pub/Sub 频道名前加上配置的 `KeyPrefix`。
@@ -56,4 +53,5 @@ type Delivery struct {
 - `node.PushToConns(ctx, connIDs, frame)` 与 `node.PushToUsers(ctx, userIDs, frame)` 返回 `(*wskit.DeliveryResult, error)`，仅向该节点本地连接入队，不附加消息 ID。宿主负责目标授权。
 - 本地推送复制调用方的帧数据，保留文本/二进制类型。上下文已取消、数据帧无效时返回错误；连接不存在或队列无法接受时计入 `FailedConnIDs`。用户在该节点没有连接时为空目标，结果仍为接受成功。
 - 直接读取 `delivery.Accepted` 等字段保持不变；构造字面量时需显式填写嵌入字段 `DeliveryResult`。JSON 编码仍将这些字段展平。
-- 原 `backend.Acks()` 删除，客户端回执和超时语义不变，业务使用根包 Sender 的查询和超时扫描能力。
+- `NodeConfig.BeforePush` 是可选回调，签名为 `func(context.Context, wskit.Frame, []wskit.SessionInfo) error`。gRPC 或本地直接推送存在本地目标时，节点在入队前调用一次。帧为只读，回调返回错误会中止本次节点推送。
+- `node.UserIDForConn(connID) (string, bool)` 查询活跃本地连接对应的用户。[节点 gRPC 契约](websocket-push-grpc.md)

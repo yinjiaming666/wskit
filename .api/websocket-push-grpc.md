@@ -57,5 +57,5 @@ gRPC 调用错误直接返回为 RPC error；业务失败通过 `PushResponse.ac
 
 ## 备注
 - `payload` 是业务编码的原始字节，`frame_type` 指定文本或二进制帧。目标连接或用户由外层请求指定。
-- Node 写入本地连接发送队列成功只代表 Node 已接受，不代表 WebSocket 写入完成，也不代表客户端已经 ACK。
-- Go 内部统一使用 `DeliveryResult`，protobuf `PushResponse` 保留在协议边界；本次没有更改 RPC、字段编号、序列化或传输方案。
+- Node 接受推送后将数据帧写入本地连接发送队列，由连接异步写入 WebSocket。
+- Go 内部统一使用 `DeliveryResult`，protobuf `PushResponse` 保留在协议边界。

@@ -45,9 +45,8 @@ byId("connection").addEventListener("submit", async (event) => {
       record("连接", userID + " 已连接 " + route.endpoint_id + "，默认加入 lobby");
     };
     socket.onmessage = ({ data }) => {
-      const { text, id } = JSON.parse(data);
+      const { text } = JSON.parse(data);
       record("收到", text);
-      if (id) send("ack", id);
     };
     socket.onerror = () => record("错误", "WebSocket 连接出错");
     socket.onclose = () => {

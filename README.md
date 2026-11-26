@@ -18,7 +18,7 @@ Go 包名是 `wskit`。从 `v0.1.0` 升级时，将调用中的 `socketserver.` 
 
 每个进程调用 `wskit.NewRedisBackend(wskit.RedisConfig{Addr: redisAddr, KeyPrefix: "myapp:"})`，同一进程内的 Node、Gateway 和 Sender 可以共用这个实例。调用 `backend.Ready(ctx)` 可验证 Redis 连接。一个项目的各个进程使用同一 Redis 数据库和前缀。现有集群升级时，发送服务与 WebSocket 节点需使用兼容的 gRPC 和 Redis 消息格式，建议统一版本。多个项目共用 Redis 时各设唯一的 `KeyPrefix`，因为 Pub/Sub 频道跨逻辑数据库可见。每个运行中的 Node 使用唯一的 `EndpointID`，并将 `GRPCAddr` 配置为发送方能访问的监听地址。
 
-库负责 WebSocket 握手、连接生命周期、节点路由、频道扇出和逐连接回执。业务项目负责鉴权、订阅权限、应用消息编码与解析。`wskit.Frame` 带有 `Type` 和 `Data`，支持 UTF-8 文本和任意二进制数据。WebSocket 协议级 Ping/Pong 由节点处理。
+库负责 WebSocket 握手、连接生命周期、节点路由和频道扇出。业务项目负责鉴权、订阅权限、应用消息编码与解析。`wskit.Frame` 带有 `Type` 和 `Data`，支持 UTF-8 文本和任意二进制数据。WebSocket 协议级 Ping/Pong 由节点处理。
 
 下面的 Node 把收到的数据帧原样返回，浏览器连接时默认订阅 `lobby`。省略 `ConnID` 时，框架会为每次连接生成唯一 ID。[加入、退出和推送示例](example/README.md)
 
@@ -48,8 +48,8 @@ func runNode(ctx context.Context, mux *http.ServeMux, backend *wskit.Backend) er
 | 业务操作 | Go 接口 |
 |---|---|
 | 分配连接节点 | `wskit.CreateGateway(wskit.GatewayConfig{PublicURL: "wss://ws.example.com"}, backend)` 创建网关。`gateway.Route(ctx, userID)` 返回节点和 WebSocket 地址。 |
-| 向频道在线订阅者广播 | `sender.SendToChannel(ctx, "group:42", msg)` 通过 Redis Pub/Sub 发布，返回发布过程的错误。客户端按原有格式接收 `msg.Frame`，无需回执。 |
-| 一对一私聊 | `sender.Send(ctx, toUserID, msg)` 通过 gRPC 投递到收件人的所有在线设备，结果列出已入队和失败的连接。消息 ID 由业务生成，包含在应用协议中。客户端回执由业务解析后调用 `Session.Ack(ctx, id)`。 |
+| 向频道在线订阅者广播 | `sender.SendToChannel(ctx, "group:42", msg)` 通过 Redis Pub/Sub 发布，返回发布过程的错误。客户端按原有格式接收 `msg.Frame`。 |
+| 一对一私聊 | `sender.Send(ctx, toUserID, msg)` 通过 gRPC 投递到收件人的所有在线设备，结果列出已入队和失败的连接。消息 ID 可由业务指定。 |
 
 业务负责消息存储。聊天记录可以在发送前保存，投递流水可以在发送后按同步结果记录。私聊用 `Delivery.AcceptedConnIDs` 和 `FailedConnIDs` 区分入队情况，频道广播用返回的 `error` 判断发布结果。[Go 发送接口契约](.api/websocket-sender.md)
 
@@ -71,7 +71,7 @@ msg := wskit.Message{
 result, err := sender.Send(ctx, "alice", msg)
 ```
 
-消息 ID 用于库内跟踪投递，客户端看到的字段由 `Frame.Data` 决定。发送服务可以运行 `sender.RunAckTimeouts(ctx)` 扫描超时回执，退出时调用 `sender.Close()`。
+客户端接收 `Frame.Data` 中的业务数据。宿主可以通过 `NodeConfig.BeforePush` 在直接推送入队前获取帧和本地目标连接，通过 `Node.UserIDForConn` 查询活跃本地连接对应的用户。
 
 ### 公开 API 与迁移
 
@@ -82,13 +82,12 @@ result, err := sender.Send(ctx, "alice", msg)
 | `domain.SendResult`、`domain.PushResponse` | 统一使用 `wskit.DeliveryResult`。`Node.PushToConns`、`Node.PushToUsers` 返回 `*DeliveryResult`。protobuf 的 `PushResponse` 仅用于 gRPC 边界。 |
 | `Delivery` 中重复的结果字段 | 改为嵌入 `DeliveryResult`，保留 `MessageID`。读取 `result.Accepted` 等字段的代码不变；结构体字面量改为 `Delivery{MessageID: id, DeliveryResult: wskit.DeliveryResult{Accepted: true}}`。 |
 | `backend.Endpoints()`、`Routes()`、`Channels()` | 删除仓储访问器。分配节点用 `Gateway.Route`，投递用 `Sender.Send` / `SendToChannel`，本地订阅用 `Node` / `Session` 的 `Subscribe`、`Unsubscribe`。节点注册和路由租约由 `Node.Run` 维护，不提供原始仓储读写替代接口。 |
-| `backend.Acks()` | 查询用 `Sender.PendingConnections`、`AckedConnections`、`FailedConnections`；登记客户端回执用 `Session.Ack` / `Node.Ack`，超时扫描用 `Sender.RunAckTimeouts`。不公开底层状态写入接口。 |
 | `bus`、`push`、`sender`、`redisclient` 等子包 | 改用根包 `NewRedisBackend`、`NewSender` 和 `CreateNode`；删除无调用的传输包装层与 `message.EnsureMessageID`，消息 ID 由业务生成。 |
 | `NewClient`、`NewRoomHub` | 本地连接和频道订阅映射改为私有实现，业务通过 `Session` / `Node` 操作。 |
 | `httpx.ServeHTTP` / `ServeHTTPContext`、`HTTPServerConfig` | 宿主创建 `http.Server` 并管理信号和优雅退出，参见示例。 |
 | `Node.RegisterHealthRoutes`、`HealthResponse` | 宿主注册路由并定义响应，结合 `Node.Ready()`、`Node.ConnCount()` 和 `Backend.Ready(ctx)` 查询状态。 |
 
-`DeliveryResult.Accepted` 表示所有已解析目标连接均入队成功；无在线连接时仍为 `true`，两组连接列表为空。它不表示 WebSocket 写入完成或客户端确认。`FailedConnections` 查询回执跟踪的失败状态，与同步结果中的 `FailedConnIDs`（入队失败）分开使用。
+`DeliveryResult.Accepted` 表示所有已解析目标连接均入队成功；无在线连接时仍为 `true`，两组连接列表为空。WebSocket 写入在入队后异步执行。
 
 ### 宿主生命周期
 

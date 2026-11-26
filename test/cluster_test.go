@@ -15,7 +15,6 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/yinjiaming666/wskit"
-	"github.com/yinjiaming666/wskit/internal/ack"
 	"github.com/yinjiaming666/wskit/internal/channel"
 	"github.com/yinjiaming666/wskit/internal/endpoint"
 	"github.com/yinjiaming666/wskit/internal/redisclient"
@@ -116,11 +115,6 @@ func testHostProtocol(ctx context.Context, session *wskit.Session, f wskit.Frame
 			return err
 		}
 		return session.Send(textFrame("left"))
-	case "seen":
-		if err := session.Ack(ctx, arg); err != nil {
-			return err
-		}
-		return session.Send(textFrame("recorded"))
 	default:
 		return session.Send(f)
 	}
@@ -247,9 +241,6 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantFrame(t, tablet, notice.Frame)
-	if pending, err := s.PendingConnections(ctx, notice.ID); err != nil || len(pending) != 0 {
-		t.Fatalf("channel broadcast has pending receipts %v, error %v", pending, err)
-	}
 
 	if err := first.node.BeginDrain(ctx); err != nil {
 		t.Fatal(err)
@@ -259,7 +250,7 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 		t.Fatalf("route after drain %+v, %v", selected, err)
 	}
 	private := wskit.Frame{Type: wskit.BinaryFrame, Data: []byte("priv-1\x00\xff")}
-	direct, err := s.Send(ctx, "alice", wskit.Message{ID: "priv-1", Frame: private})
+	direct, err := s.Send(ctx, "alice", wskit.Message{Frame: private})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,43 +259,6 @@ func TestChannelAndDirectDelivery(t *testing.T) {
 		t.Fatalf("direct result: %+v", direct)
 	}
 	for _, conn := range []*websocket.Conn{phone, web} {
-		received := wantFrame(t, conn, private)
-		id, _, _ := bytes.Cut(received.Data, []byte{0})
-		sendFrame(t, conn, textFrame("seen "+string(id)))
-		wantFrame(t, conn, textFrame("recorded"))
-	}
-	acked, err := s.AckedConnections(ctx, direct.MessageID)
-	slices.Sort(acked)
-	if err != nil || !slices.Equal(acked, direct.AcceptedConnIDs) {
-		t.Fatalf("ACKs %v, %v", acked, err)
-	}
-	// A single user's devices can acknowledge the same direct message independently.
-	partial, err := s.Send(ctx, "alice", wskit.Message{ID: "partial-1", Frame: textFrame("second private message")})
-	if err != nil || !partial.Accepted {
-		t.Fatalf("partial delivery %+v, %v", partial, err)
-	}
-	for _, conn := range []*websocket.Conn{phone, web} {
-		wantFrame(t, conn, textFrame("second private message"))
-	}
-	sendFrame(t, web, textFrame("seen "+partial.MessageID))
-	wantFrame(t, web, textFrame("recorded"))
-	pending, err := s.PendingConnections(ctx, partial.MessageID)
-	if err != nil || !slices.Equal(pending, []string{"phone"}) {
-		t.Fatalf("pending device ACKs %v, %v", pending, err)
-	}
-
-	// A late client receipt must leave a timed-out delivery in its terminal state.
-	if err := ack.NewRedisStore(state).MarkFailed(ctx, partial.MessageID, "phone", "timeout"); err != nil {
-		t.Fatal(err)
-	}
-	sendFrame(t, phone, textFrame("seen "+partial.MessageID))
-	wantFrame(t, phone, textFrame("recorded"))
-	failed, err := s.FailedConnections(ctx, partial.MessageID)
-	if err != nil || !slices.Equal(failed, []string{"phone"}) {
-		t.Fatalf("failed connections after late ACK %v, %v", failed, err)
-	}
-	acked, err = s.AckedConnections(ctx, partial.MessageID)
-	if err != nil || !slices.Equal(acked, []string{"web"}) {
-		t.Fatalf("confirmed connections after late ACK %v, %v", acked, err)
+		wantFrame(t, conn, private)
 	}
 }

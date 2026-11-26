@@ -40,21 +40,6 @@ func LastEndpointKey(userID string) string {
 	return fmt.Sprintf("route:last_endpoint:%s", userID)
 }
 
-// AckPendingKey 返回消息待 ACK 连接集合 Key。
-func AckPendingKey(messageID string) string {
-	return fmt.Sprintf("ack:msg:%s:pending", messageID)
-}
-
-// AckDoneKey 返回消息已 ACK 连接集合 Key。
-func AckDoneKey(messageID string) string {
-	return fmt.Sprintf("ack:msg:%s:done", messageID)
-}
-
-// AckFailedKey 返回消息失败 ACK 连接集合 Key。
-func AckFailedKey(messageID string) string {
-	return fmt.Sprintf("ack:msg:%s:failed", messageID)
-}
-
 // ChannelNodesKey 返回频道承载节点租约有序集合 Key。
 func ChannelNodesKey(channelID string) string {
 	return fmt.Sprintf("live:channel:%s:nodes", channelID)

@@ -60,11 +60,6 @@ func (s *Session) Send(frame Frame) error {
 	return nil
 }
 
-// Ack confirms an application message ID for this connection only.
-func (s *Session) Ack(ctx context.Context, messageID string) error {
-	return s.node.withClient(s.client, func() error { return s.node.HandleClientAck(ctx, messageID, s.ConnID()) })
-}
-
 func (n *nodeCore) withClient(client *localClient, fn func() error) error {
 	lock := n.connectionLock(client.ConnID)
 	lock.Lock()

@@ -37,8 +37,6 @@ func chatHandler(sender *wskit.Sender) wskit.MessageHandler {
 			reply = fmt.Sprintf("已入队 %d 个连接，失败 %d 个", len(delivery.AcceptedConnIDs), len(delivery.FailedConnIDs))
 		case "sendToChannel":
 			err = sender.SendToChannel(ctx, cmd.Target, demo.TextMessage(cmd.Text, ""))
-		case "ack":
-			return session.Ack(ctx, cmd.Target)
 		default:
 			return respond("unknown op: " + cmd.Op)
 		}

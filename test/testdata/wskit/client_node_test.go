@@ -79,7 +79,16 @@ func TestOldConnectionCannotRemoveReplacement(t *testing.T) {
 
 func TestNodePushReportsQueueAcceptanceBeforeWebSocketWrite(t *testing.T) {
 	ctx := context.Background()
-	core := newTestNode(NodeConfig{EndpointID: "delivery-node", SendBuffer: 1})
+	var beforePushErr error
+	var recipients []SessionInfo
+	core := newTestNode(NodeConfig{
+		EndpointID: "delivery-node",
+		SendBuffer: 1,
+		BeforePush: func(_ context.Context, _ Frame, targets []SessionInfo) error {
+			recipients = targets
+			return beforePushErr
+		},
+	})
 	local, err := core.RegisterSession(ctx, SessionInfo{ConnID: "online", UserID: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -103,6 +112,15 @@ func TestNodePushReportsQueueAcceptanceBeforeWebSocketWrite(t *testing.T) {
 	if writes != 0 || !bytes.Equal(queued.Data, []byte{0, 255}) {
 		t.Fatalf("push wrote to socket or retained mutable caller data: writes=%d frame=%v", writes, queued)
 	}
+	if len(recipients) != 1 || recipients[0].ConnID != "online" || recipients[0].UserID != "user" {
+		t.Fatalf("unexpected local recipients: %+v", recipients)
+	}
+	beforePushErr = errors.New("push rejected by host")
+	result, err = node.PushToUsers(ctx, []string{"user"}, frame)
+	if err != beforePushErr || result != nil || len(local.Send) != 0 {
+		t.Fatalf("rejected push = %+v, %v; queued=%d", result, err, len(local.Send))
+	}
+	beforePushErr = nil
 	result, err = node.PushToUsers(ctx, []string{"user"}, Frame{Type: TextFrame, Data: []byte("queued")})
 	if err != nil || !result.Accepted || !slices.Equal(result.AcceptedConnIDs, []string{"online"}) {
 		t.Fatalf("user enqueue = %+v, %v", result, err)

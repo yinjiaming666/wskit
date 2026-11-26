@@ -13,7 +13,7 @@ import (
 func newTestNode(cfg NodeConfig) *nodeCore {
 	endpoints := &testEndpoints{byID: make(map[string]domain.Endpoint)}
 	routes := &testRoutes{byConn: make(map[string]domain.ConnInfo)}
-	return newNodeCore(cfg, endpoints, routes, nil)
+	return newNodeCore(cfg, endpoints, routes)
 }
 
 // The node tests exercise only endpoint heartbeats and connection registration/cleanup.

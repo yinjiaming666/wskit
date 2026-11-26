@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/yinjiaming666/wskit/internal/ack"
 	"github.com/yinjiaming666/wskit/internal/channel"
 	"github.com/yinjiaming666/wskit/internal/endpoint"
 	"github.com/yinjiaming666/wskit/internal/redisclient"
@@ -19,7 +18,6 @@ type Backend struct {
 	endpoints *endpoint.RedisRepository
 	routes    *route.RedisResolver
 	channels  *channel.RedisRegistry
-	acks      *ack.RedisStore
 }
 
 // RedisConfig identifies a Redis cluster namespace. All components share the DB and KeyPrefix.
@@ -33,7 +31,6 @@ func NewRedisBackend(cfg RedisConfig) *Backend {
 		endpoints: endpoint.NewRedisRepository(client),
 		routes:    route.NewRedisResolver(client),
 		channels:  channel.NewRedisRegistry(client),
-		acks:      ack.NewRedisStore(client),
 	}
 }
 
